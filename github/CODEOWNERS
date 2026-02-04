@@ -1,0 +1,22 @@
+# Global code owners
+* @your-github-username
+
+# Backend code
+/backend/ @your-github-username @backend-team
+
+# Frontend code
+/src/ @your-github-username @frontend-team
+
+# Docker configuration
+Dockerfile* @your-github-username @devops-team
+docker-compose*.yml @your-github-username @devops-team
+
+# CI/CD
+.github/workflows/ @your-github-username @devops-team
+
+# Documentation
+*.md @your-github-username @docs-team
+
+# Security-sensitive files
+backend/config/ @your-github-username @security-team
+.env* @your-github-username @security-team

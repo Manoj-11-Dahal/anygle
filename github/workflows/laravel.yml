@@ -1,0 +1,160 @@
+name: Laravel CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/laravel.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: anygle_test
+          MYSQL_USER: anygle
+          MYSQL_PASSWORD: secret
+          MYSQL_ROOT_PASSWORD: secret
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+      
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: mbstring, xml, ctype, iconv, intl, pdo, pdo_mysql, dom, filter, json, openssl, redis
+        coverage: xdebug
+
+    - name: Copy .env
+      working-directory: ./backend
+      run: cp .env.example .env.testing
+
+    - name: Update .env for CI
+      working-directory: ./backend
+      run: |
+        sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env.testing
+        sed -i 's/DB_DATABASE=.*/DB_DATABASE=anygle_test/' .env.testing
+        sed -i 's/DB_USERNAME=.*/DB_USERNAME=anygle/' .env.testing
+        sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=secret/' .env.testing
+        sed -i 's/REDIS_HOST=.*/REDIS_HOST=127.0.0.1/' .env.testing
+        echo "APP_ENV=testing" >> .env.testing
+
+    - name: Validate composer.json and composer.lock
+      working-directory: ./backend
+      run: composer validate --strict
+
+    - name: Cache Composer packages
+      id: composer-cache
+      uses: actions/cache@v3
+      with:
+        path: backend/vendor
+        key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-php-
+
+    - name: Install dependencies
+      working-directory: ./backend
+      run: composer install --prefer-dist --no-progress
+
+    - name: Generate key
+      working-directory: ./backend
+      run: php artisan key:generate --env=testing
+
+    - name: Directory Permissions
+      working-directory: ./backend
+      run: chmod -R 777 storage bootstrap/cache
+
+    - name: Execute migrations
+      working-directory: ./backend
+      env:
+        APP_ENV: testing
+        DB_CONNECTION: mysql
+        DB_HOST: 127.0.0.1
+        DB_DATABASE: anygle_test
+        DB_USERNAME: anygle
+        DB_PASSWORD: secret
+      run: php artisan migrate --force
+
+    - name: Execute tests via PHPUnit
+      working-directory: ./backend
+      env:
+        APP_ENV: testing
+        DB_CONNECTION: mysql
+        DB_HOST: 127.0.0.1
+        DB_DATABASE: anygle_test
+        DB_USERNAME: anygle
+        DB_PASSWORD: secret
+        REDIS_HOST: 127.0.0.1
+      run: php artisan test --coverage --min=80
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./backend/coverage.xml
+        fail_ci_if_error: false
+
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: mbstring, xml
+
+    - name: Install dependencies
+      working-directory: ./backend
+      run: composer install --prefer-dist --no-progress
+
+    - name: Run PHP_CodeSniffer
+      working-directory: ./backend
+      run: ./vendor/bin/phpcs --standard=PSR12 app tests
+
+    - name: Run PHPStan
+      working-directory: ./backend
+      run: ./vendor/bin/phpstan analyse app --level=8 --no-progress
+
+    - name: Run PHP CS Fixer (dry-run)
+      working-directory: ./backend
+      run: ./vendor/bin/php-cs-fixer fix --dry-run --diff --config=.php-cs-fixer.php
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+
+    - name: Install dependencies
+      working-directory: ./backend
+      run: composer install --prefer-dist --no-progress
+
+    - name: Run security audit
+      working-directory: ./backend
+      run: ./vendor/bin/security-checker security:check
+
+    - name: Run composer audit
+      working-directory: ./backend
+      run: composer audit
