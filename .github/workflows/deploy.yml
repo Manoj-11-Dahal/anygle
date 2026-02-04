@@ -14,7 +14,8 @@ on:
         options:
           - staging
           - production
-          
+
+        
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
